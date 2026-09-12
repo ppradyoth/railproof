@@ -6,7 +6,27 @@ Railguard is a policy-as-code enforcement layer for LLM applications and agents.
 
 The first release should be small enough to test with real applications but deep enough to demonstrate a clear security thesis: agent actions need explicit authorization and inspectable evidence.
 
-## 2. Problem
+## 2. Competitive objective
+
+Railguard must beat NeMo Guardrails for teams securing real agents. That does not mean matching every feature. It means winning on the parts that determine whether a security engineer can deploy, investigate, and trust a control.
+
+NeMo already has a strong configurable rail model across input, retrieval, dialog, execution, and output, with YAML, Colang, custom actions, a Python library, and a production microservice. [Its documentation](https://docs.nvidia.com/nemo/guardrails/latest/index.html) makes that baseline clear.
+
+Railguard's win condition is:
+
+| Dimension | Railguard target | Proof |
+|---|---|---|
+| Adoption | First useful policy in under 10 minutes | Copy-paste quickstart with a fake tool |
+| Configuration | YAML that a security engineer can review in a pull request | Schema validation and policy explain output |
+| Agent security | Strong pre-execution tool authorization | Executor receives no denied call |
+| Evidence | Every decision has policy, detector, stage, and evidence metadata | Replayable audit event |
+| Evaluation | Reports protection and failure cases | Versioned benign and adversarial fixtures |
+| Portability | Same policy across model providers and integrations | Provider-neutral event contract |
+| Operations | Safe failure, dry-run, latency, and trace correlation | Integration tests and metrics |
+
+If Railguard cannot prove these wins with a running example and measured results, it is not ready to claim superiority.
+
+## 3. Problem
 
 Most guardrail implementations are scattered across prompts, callbacks, ad hoc regular expressions, and provider-specific code. That makes it hard to answer basic operational questions:
 
@@ -18,7 +38,7 @@ Most guardrail implementations are scattered across prompts, callbacks, ad hoc r
 
 Railguard makes those decisions explicit and testable.
 
-## 3. Product boundary
+## 4. Product boundary
 
 ### In scope
 
@@ -40,7 +60,7 @@ Railguard makes those decisions explicit and testable.
 - Replacing identity, authorization, DLP, or network controls
 - Automatic execution of untrusted tools
 
-## 4. Users
+## 5. Users
 
 ### Primary user
 
@@ -52,7 +72,7 @@ An engineer responsible for an LLM feature or agent who needs enforceable contro
 - Platform teams standardizing controls across applications
 - Researchers measuring guardrail efficacy
 
-## 5. Security thesis
+## 6. Security thesis
 
 The most valuable initial control point is the tool boundary. A model can produce an unsafe answer, but an agent can also take an unsafe action. Railguard therefore treats tool calls as authorization decisions, not merely text to moderate.
 
@@ -63,7 +83,7 @@ The system must distinguish:
 - a model judgment from a deterministic rule
 - an observation from a confirmed security impact
 
-## 6. Proposed architecture
+## 7. Proposed architecture
 
 ```text
 Application
@@ -108,7 +128,7 @@ Implements allow, deny, redact, retry, approval, and escalate. Tool checks must 
 
 Emits structured events with policy version, event type, detector results, decision, latency, and redacted evidence. Raw secrets must never enter default logs.
 
-## 7. Configuration design
+## 8. Configuration design
 
 The first configuration format should remain readable without learning a new language.
 
@@ -153,7 +173,7 @@ Configuration requirements:
 - policy hash in every audit event
 - safe defaults for detector or approval failures
 
-## 8. MVP release
+## 9. MVP release
 
 ### MVP capabilities
 
@@ -177,7 +197,7 @@ Configuration requirements:
 - Every decision is reproducible from the recorded policy version and event fixture.
 - The test runner reports true positives, false positives, false negatives, and unresolved cases.
 
-## 9. Delivery roadmap
+## 10. Delivery roadmap
 
 ### Phase 0: repository and contract
 
@@ -215,7 +235,7 @@ Publish examples, API documentation, threat model, benchmark fixtures, contribut
 
 Exit criteria: an external developer can install, configure, run, and understand the limits of the project without private context.
 
-## 10. Initial backlog
+## 11. Initial backlog
 
 ### P0
 
@@ -245,7 +265,7 @@ Exit criteria: an external developer can install, configure, run, and understand
 - Add a local replay UI only after the SDK contract is stable.
 - Add language bindings only after Python usage is validated.
 
-## 11. Threat model
+## 12. Threat model
 
 ### Assets
 
@@ -279,7 +299,7 @@ Exit criteria: an external developer can install, configure, run, and understand
 
 Railguard does not make the model trusted. Model output, retrieved content, and tool results remain untrusted at every boundary.
 
-## 12. Evaluation strategy
+## 13. Evaluation strategy
 
 Every security claim must include:
 
@@ -305,7 +325,7 @@ Metrics:
 
 The benchmark must never present a blocked test case as proof of a production vulnerability. It measures the control under a defined fixture and configuration.
 
-## 13. API shape
+## 14. API shape
 
 ```python
 decision = await guardrail.inspect_tool_call(
@@ -323,7 +343,7 @@ result = await executor.call(name, arguments)
 
 The API should make the unsafe path difficult to write. The executor should not run until the decision has been enforced.
 
-## 14. Repository structure
+## 15. Repository structure
 
 ```text
 railguard/
@@ -351,7 +371,7 @@ railguard/
     └── evaluation-methodology.md
 ```
 
-## 15. Quality and release gates
+## 16. Quality and release gates
 
 - Formatting, linting, typing, and tests pass in CI.
 - No default logs contain raw secrets.
@@ -362,11 +382,19 @@ railguard/
 - Security findings are reproducible from committed fixtures.
 - Public examples use fake credentials and fake external systems.
 
-## 16. Risks and decisions
+## 17. Risks and decisions
 
 ### Risk: becoming a NeMo clone
 
-Decision: focus the first release on security policy enforcement at the tool and data boundaries, with evidence and evaluation as first-class features.
+Decision: do not reproduce broad conversational-flow features first. Focus the initial release on security policy enforcement at the tool and data boundaries, with evidence and evaluation as first-class features.
+
+### Risk: winning only in a benchmark
+
+Decision: measure the full developer workflow: installation, policy authoring, startup errors, pre-execution blocking, audit review, replay, and latency. A high detector score alone does not beat a mature framework.
+
+### Risk: making the policy language impressive but unusable
+
+Decision: require every new policy feature to ship with a short example, a schema error example, and a test fixture. Keep the common path YAML-only.
 
 ### Risk: model-backed detectors create false confidence
 
@@ -384,7 +412,7 @@ Decision: keep a stable core event and decision API, then treat integrations as 
 
 Decision: keep v0.1 self-hosted and local. Revisit hosted management only after SDK adoption and policy workflows are validated.
 
-## 17. Public positioning
+## 18. Public positioning
 
 Railguard is an open-source policy-as-code layer for inspectable LLM and agent security decisions.
 
@@ -397,7 +425,7 @@ The strongest public proof will be:
 
 Do not market it as a complete solution to prompt injection. Market it as a practical enforcement and evaluation layer that makes security controls explicit.
 
-## 18. First build session
+## 19. First build session
 
 1. Confirm the name and license.
 2. Create the Python package and test runner.
@@ -405,3 +433,16 @@ Do not market it as a complete solution to prompt injection. Market it as a prac
 4. Add one end-to-end fake-agent example.
 5. Write the first ten fixtures: five attack cases and five benign cases.
 6. Verify that a blocked tool call never reaches the executor.
+
+## 20. Competitive build sequence
+
+The project should earn the “beats NeMo” claim in this order:
+
+1. Ship a five-minute quickstart that wraps one existing tool-calling agent.
+2. Demonstrate a denied tool call before execution with an exact audit event.
+3. Add approval gates and argument-level constraints that are easy to review.
+4. Add replayable attack and benign fixtures with false-positive and false-negative reporting.
+5. Add provider-neutral adapters and a clear migration path from ad hoc callbacks.
+6. Publish a side-by-side evaluation using the same scenarios and disclose where Railguard loses.
+
+Do not build a dashboard, hosted policy service, or new flow language before these six steps work.
