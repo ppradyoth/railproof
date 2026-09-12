@@ -1,51 +1,75 @@
-# Railguard
+# Railproof
 
-Configurable security guardrails for LLM applications and agents.
+Security contracts for AI agent actions.
 
-Railguard sits between an application and its model, retrieval system, or tools. Teams define policies once, then enforce them across input, retrieved content, model output, and tool execution.
+Railproof compiles readable policy into a mandatory checkpoint between an agent and its tools. It decides whether an action is allowed, denied, rewritten, or held for approval. Every decision carries the rule, evidence, policy hash, and event chain needed to replay it.
 
-Railguard is built to beat NeMo Guardrails on the security-engineering workflow. Its focus is explainable control over agent behavior: prompt-injection resistance, sensitive-data handling, tool authorization, approval gates, and audit-ready decisions.
+This is the working project name. `Railguard` was dropped because an existing `railguard-sdk` package already uses it.
 
-## Status
+## The wedge
 
-Pre-development. The product and implementation plan are in [PROJECT_PLAN.md](PROJECT_PLAN.md).
+General guardrail frameworks already moderate model input and output, guide conversations, validate tool names and schemas, evaluate policies, and emit traces. Railproof starts where those controls stop:
 
-## Design target
+- authorize the exact action, target, arguments, principal, and session state
+- track untrusted and sensitive data across model, retrieval, and tool boundaries
+- prevent prohibited information flows before a tool executes
+- bind approvals to one exact action instead of trusting a generic yes/no response
+- compile policy before runtime and reject gaps, conflicts, and unsupported enforcement points
+- replay decisions deterministically and mutation-test the policy suite
+
+## Target configuration
 
 ```yaml
-rails:
-  input:
-    - detect_prompt_injection
-  tools:
-    - require_approval_for: [send_email, delete_file]
-    - deny_if: data_exfiltration
-  output:
-    - redact_secrets
+apiVersion: railproof.dev/v1alpha1
+kind: AgentSecurityPolicy
+
+tools:
+  send_email:
+    risk: high
+    sink: external
+
+rules:
+  - id: block-untrusted-recipient
+    stage: before_tool
+    match:
+      tool: send_email
+      arguments.to:
+        derives_from: untrusted
+    effect: deny
+
+  - id: approve-sensitive-email
+    stage: before_tool
+    match:
+      tool: send_email
+      arguments.body:
+        contains_label: sensitive
+    effect: require_approval
+    approval:
+      bind: [tool, arguments, policy_hash]
+      expires_in: 5m
 ```
 
-Every decision should answer four questions:
+## What counts as success
 
-1. What was inspected?
-2. Which policy matched?
-3. What action was taken?
-4. What evidence supports the decision?
+Railproof earns a comparison with NeMo only after the same public scenarios run against both systems. The benchmark must include attacks, benign controls, false positives, false negatives, latency, setup time, and proof that denied actions never reached the executor.
 
-## Principles
+No benchmark result exists yet. No superiority claim has been earned yet.
 
-- Policy before prompts. Security decisions must not depend only on a system prompt.
-- Fail closed for explicitly dangerous actions.
-- Preserve the original request and decision context for investigation.
-- Make enforcement portable across model providers.
-- Treat retrieved text and tool results as untrusted input.
-- Measure false positives and false negatives instead of claiming perfect protection.
+## Project status
 
-## Intended first integrations
+Planning complete. Implementation has not started.
 
-- Python applications
-- FastAPI middleware
-- OpenAI-compatible chat and tool-calling clients
-- LangChain and framework-neutral adapters
+- [Project plan](PROJECT_PLAN.md)
+- [Product specification](docs/PRODUCT_SPEC.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Competitive analysis](docs/COMPETITIVE_ANALYSIS.md)
+- [Benchmark specification](docs/BENCHMARK.md)
+- [Roadmap](ROADMAP.md)
+- [Decision log](docs/DECISIONS.md)
 
-## License
+## Intended first release
 
-License will be selected before the first public release.
+The first alpha will be a Python library with a framework-neutral enforcement API, YAML policies, a wrapped tool executor, deterministic policy checks, trust labels, approval binding, JSONL evidence, and a local replay CLI.
+
+No hosted service. No dashboard. No custom policy language until the core security contract works.
