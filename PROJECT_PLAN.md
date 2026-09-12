@@ -1,448 +1,218 @@
-# Railguard project plan
+# Railproof project plan
 
-## 1. Product definition
+Goal: build the strongest open-source security contract and enforcement layer for tool-using AI agents.
 
-Railguard is a policy-as-code enforcement layer for LLM applications and agents. Developers configure security rails in YAML, call Railguard from an SDK or middleware, and receive an allow, deny, redact, retry, approval, or escalation decision.
+## Product thesis
 
-The first release should be small enough to test with real applications but deep enough to demonstrate a clear security thesis: agent actions need explicit authorization and inspectable evidence.
+Models can propose actions. They cannot grant themselves authority.
 
-## 2. Competitive objective
+Railproof places a policy enforcement point immediately before every tool execution. It evaluates the requested action against the authenticated principal, exact arguments, data provenance, trust labels, prior actions, budgets, approvals, and policy version.
 
-Railguard must beat NeMo Guardrails for teams securing real agents. That does not mean matching every feature. It means winning on the parts that determine whether a security engineer can deploy, investigate, and trust a control.
+The output is a structured decision. The runtime either executes the approved action through a controlled wrapper or proves that it did not execute.
 
-NeMo already has a strong configurable rail model across input, retrieval, dialog, execution, and output, with YAML, Colang, custom actions, a Python library, and a production microservice. [Its documentation](https://docs.nvidia.com/nemo/guardrails/latest/index.html) makes that baseline clear.
+## What we got wrong in the first draft
 
-Railguard's win condition is:
+The first plan treated tool validation, evaluation, tracing, provider portability, and explainability as open territory. NeMo Guardrails already covers substantial parts of that surface.
 
-| Dimension | Railguard target | Proof |
-|---|---|---|
-| Adoption | First useful policy in under 10 minutes | Copy-paste quickstart with a fake tool |
-| Configuration | YAML that a security engineer can review in a pull request | Schema validation and policy explain output |
-| Agent security | Strong pre-execution tool authorization | Executor receives no denied call |
-| Evidence | Every decision has policy, detector, stage, and evidence metadata | Replayable audit event |
-| Evaluation | Reports protection and failure cases | Versioned benign and adversarial fixtures |
-| Portability | Same policy across model providers and integrations | Provider-neutral event contract |
-| Operations | Safe failure, dry-run, latency, and trace correlation | Integration tests and metrics |
+The first plan also used “beat NeMo” before defining:
 
-If Railguard cannot prove these wins with a running example and measured results, it is not ready to claim superiority.
+- the category where Railproof intends to win
+- the same scenarios for both products
+- measurable acceptance criteria
+- evidence required for a comparison
+- the capabilities already offered by other agent policy engines
 
-## 3. Problem
+That is fixed. Railproof will compete on verifiable agent-action security, not broad conversational guardrails.
 
-Most guardrail implementations are scattered across prompts, callbacks, ad hoc regular expressions, and provider-specific code. That makes it hard to answer basic operational questions:
+## Product wedge
 
-- Which policy blocked this request?
-- Did the control inspect the user input, retrieved content, tool arguments, or output?
-- Was the action blocked before or after execution?
-- Is the control effective against realistic attacks?
-- Can the same policy run against another model or agent framework?
+Railproof combines four capabilities in one contract:
 
-Railguard makes those decisions explicit and testable.
+1. **Action authorization** checks the exact tool, target, arguments, principal, and session state before execution.
+2. **Information-flow enforcement** tracks where data came from and where it is allowed to go.
+3. **Policy verification** catches missing enforcement points, conflicting rules, unsupported predicates, and weakened controls before deployment.
+4. **Decision proof** records enough normalized evidence to explain and replay every verdict without storing raw secrets by default.
 
-## 4. Product boundary
+The first release does not need to beat NeMo at dialog control, content moderation breadth, model integrations, or deployment scale. It needs to beat NeMo at these four jobs with public evidence.
 
-### In scope
+## Users
 
-- Input, retrieval, output, and tool-call enforcement
-- Tool allowlists and argument-level constraints
-- Secret detection and redaction
-- Prompt-injection and instruction-like-content detection
-- Human approval gates for high-impact tools
-- Structured audit events
-- Offline policy testing against attack cases and benign cases
-- Framework-neutral Python API
+### Application engineer
 
-### Out of scope for v0.1
+Needs to put a reliable checkpoint around an existing agent without replacing the framework or model provider.
 
-- Training or fine-tuning models
-- A hosted dashboard
-- A universal classifier for every harmful category
-- Claims of complete prompt-injection prevention
-- Replacing identity, authorization, DLP, or network controls
-- Automatic execution of untrusted tools
+### Security engineer
 
-## 5. Users
+Needs policies that can be reviewed, tested, traced to exact events, and challenged with adversarial fixtures.
 
-### Primary user
+### Platform engineer
 
-An engineer responsible for an LLM feature or agent who needs enforceable controls without rewriting the application around one model vendor.
+Needs one enforcement contract across multiple agent frameworks, model providers, and tool protocols.
 
-### Secondary users
+## Product requirements
 
-- Security engineers writing policies and attack tests
-- Platform teams standardizing controls across applications
-- Researchers measuring guardrail efficacy
+The full requirements and acceptance tests live in [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md).
 
-## 6. Security thesis
+The first alpha must:
 
-The most valuable initial control point is the tool boundary. A model can produce an unsafe answer, but an agent can also take an unsafe action. Railguard therefore treats tool calls as authorization decisions, not merely text to moderate.
+- intercept every registered tool call before execution
+- deny tools and argument values outside explicit policy
+- attach trust and sensitivity labels to normalized data
+- propagate labels through declared transformations
+- block prohibited source-to-sink flows
+- issue approvals bound to exact action hashes
+- reject invalid or incomplete policy at startup
+- emit secret-safe evidence for every decision
+- replay a decision without contacting a model
+- run adversarial, benign, and mutation tests from the CLI
 
-The system must distinguish:
+## Security invariants
 
-- detection from enforcement
-- a blocked attempt from a successful bypass
-- a model judgment from a deterministic rule
-- an observation from a confirmed security impact
+1. A denied action never reaches the wrapped executor.
+2. An unregistered tool never executes through the wrapped executor.
+3. Approval for one action cannot authorize another action.
+4. Untrusted content cannot grant authority or remove a label.
+5. A detector cannot silently override a deterministic deny.
+6. An unsupported policy construct stops deployment.
+7. Default evidence does not contain raw secrets.
+8. The decision identifies the exact policy version used.
 
-## 7. Proposed architecture
+These are testable contracts, not marketing language.
 
-```text
-Application
-    |
-    v
-Railguard SDK / middleware
-    |
-    +--> Policy loader and validator
-    +--> Event normalizer
-    +--> Deterministic checks
-    +--> Model-backed detectors
-    +--> Decision engine
-    +--> Approval provider
-    +--> Audit sink
-    |
-    +--> Model, retriever, or tool executor
-```
+## Core primitives
 
-### Core modules
+| Primitive | Purpose |
+|---|---|
+| Principal | Authenticated user, service, tenant, or agent identity |
+| Event | Normalized input, retrieval, model, tool-call, tool-result, or approval record |
+| Action | Tool name, target, arguments, and declared side effects |
+| Label | Trust, sensitivity, tenant, provenance, or policy metadata attached to data |
+| Policy | Versioned rules evaluated at named enforcement stages |
+| Decision | Allow, deny, rewrite, require approval, or error |
+| Obligation | Required work before execution, such as redact, log, or obtain approval |
+| Evidence | Matched fields, rule IDs, hashes, detector results, and event links |
 
-#### Policy layer
+## Runtime boundary
 
-Loads versioned YAML, validates schemas, resolves named detectors and actions, and rejects ambiguous policy definitions at startup.
-
-#### Event layer
-
-Normalizes user messages, retrieved chunks, model responses, tool calls, tool results, and approval outcomes into a common event format.
-
-#### Detector layer
-
-Supports deterministic detectors first, then model-backed detectors behind an explicit interface. Each detector returns a result, confidence, evidence spans, and detector metadata.
-
-#### Decision engine
-
-Combines matched policies into a deterministic decision. Policy precedence must be visible. A detector recommendation must never silently override an explicit deny or approval requirement.
-
-#### Enforcement layer
-
-Implements allow, deny, redact, retry, approval, and escalate. Tool checks must run before execution. Post-execution checks are for inspection and response handling, not pretending an action was prevented.
-
-#### Audit layer
-
-Emits structured events with policy version, event type, detector results, decision, latency, and redacted evidence. Raw secrets must never enter default logs.
-
-## 8. Configuration design
-
-The first configuration format should remain readable without learning a new language.
-
-```yaml
-version: "0.1"
-
-defaults:
-  on_detector_error: deny
-
-rails:
-  input:
-    - id: prompt-injection
-      detector: instruction_conflict
-      action: deny
-
-  tools:
-    - id: restricted-tools
-      match:
-        names: [send_email, delete_file]
-      action: approval
-      approval_timeout: 300
-
-    - id: outbound-data
-      match:
-        names: [http_request]
-      detector: sensitive_data_in_arguments
-      action: deny
-
-  output:
-    - id: secrets
-      detector: secret_pattern
-      action: redact
-```
-
-Configuration requirements:
-
-- stable schema version
-- unique policy IDs
-- explicit stage and action
-- deterministic precedence
-- startup validation
-- policy hash in every audit event
-- safe defaults for detector or approval failures
-
-## 9. MVP release
-
-### MVP capabilities
-
-1. Python package with synchronous and asynchronous APIs.
-2. YAML policy loader with schema validation.
-3. Input, output, and pre-tool-call interception.
-4. Deterministic secret-pattern detector.
-5. Tool allowlist and argument constraints.
-6. Approval callback interface.
-7. Structured decision and audit event models.
-8. Offline test runner with benign and adversarial fixtures.
-9. FastAPI integration example.
-10. Documentation showing one model call, one RAG flow, and one tool-calling agent.
-
-### MVP success criteria
-
-- A developer can add Railguard to a small Python agent in under 30 minutes.
-- A policy error fails at startup with a useful location and message.
-- A dangerous tool call is blocked before the executor receives it.
-- A secret is redacted from output and absent from the default audit record.
-- Every decision is reproducible from the recorded policy version and event fixture.
-- The test runner reports true positives, false positives, false negatives, and unresolved cases.
-
-## 10. Delivery roadmap
-
-### Phase 0: repository and contract
-
-Deliver the policy schema, event model, decision vocabulary, threat model, and test fixture format.
-
-Exit criteria: two example policies can be validated, rendered, and reviewed without implementation-specific assumptions.
-
-### Phase 1: deterministic core
-
-Implement policy loading, event normalization, rule evaluation, tool authorization, redaction, and audit events.
-
-Exit criteria: unit tests cover precedence, fail-closed behavior, pre-execution blocking, redaction, and async execution.
-
-### Phase 2: integration surface
-
-Add framework-neutral wrappers, OpenAI-compatible examples, FastAPI middleware, and a tool executor interface.
-
-Exit criteria: examples run locally with a fake model and fake tools, with no provider credential required.
-
-### Phase 3: security detectors
-
-Add instruction-conflict detection, sensitive-data-in-arguments detection, retrieval-content inspection, and detector evidence spans.
-
-Exit criteria: each detector has benign controls, attack fixtures, known limitations, and measured results.
-
-### Phase 4: evaluation and hardening
-
-Add replay tests, latency measurements, policy mutation tests, fuzzing for configuration inputs, and concurrency tests.
-
-Exit criteria: release report includes coverage, performance, failure modes, and cases where the control does not protect the application.
-
-### Phase 5: public alpha
-
-Publish examples, API documentation, threat model, benchmark fixtures, contribution rules, and a versioned release.
-
-Exit criteria: an external developer can install, configure, run, and understand the limits of the project without private context.
-
-## 11. Initial backlog
-
-### P0
-
-- Define `RailEvent`, `DetectorResult`, `PolicyMatch`, and `Decision` contracts.
-- Define YAML schema and validation errors.
-- Implement deterministic policy precedence.
-- Implement tool name and argument matching.
-- Implement allow, deny, redact, and approval actions.
-- Implement secret-pattern detection with redaction spans.
-- Implement JSON audit events with secret-safe defaults.
-- Add fixture runner and initial attack/benign cases.
-
-### P1
-
-- Add retrieval-stage interception.
-- Add detector plugin interface.
-- Add model-backed detector adapter.
-- Add OpenTelemetry-compatible trace correlation.
-- Add policy dry-run mode.
-- Add policy explain output for local debugging.
-- Add latency and decision metrics.
-
-### P2
-
-- Add policy bundles and signed policy distribution.
-- Add approval providers for common ticket or chat systems.
-- Add a local replay UI only after the SDK contract is stable.
-- Add language bindings only after Python usage is validated.
-
-## 12. Threat model
-
-### Assets
-
-- secrets in prompts, context, tool arguments, and outputs
-- external systems reachable through tools
-- user and tenant data
-- policy integrity
-- audit records
-- approval decisions
-
-### Threats
-
-- prompt injection in user input or retrieved content
-- tool argument manipulation
-- unauthorized high-impact tool execution
-- secret exfiltration through tool calls or responses
-- detector evasion and encoding tricks
-- policy misconfiguration
-- fail-open behavior after detector or approval errors
-- audit log leakage
-- replay or tampering with policy versions
-
-### Trust boundaries
-
-- user input to application
-- retriever to agent context
-- model to application
-- model to tool executor
-- Railguard to external detector
-- application to audit sink
-
-Railguard does not make the model trusted. Model output, retrieved content, and tool results remain untrusted at every boundary.
-
-## 13. Evaluation strategy
-
-Every security claim must include:
-
-- exact fixture input
-- expected policy behavior
-- actual decision
-- positive control
-- benign control
-- detector and policy versions
-- whether the action was prevented before execution
-- known limitations
-
-Metrics:
-
-- true-positive rate
-- false-positive rate
-- false-negative rate
-- pre-execution prevention rate
-- approval completion rate
-- p50 and p95 added latency
-- policy validation failure rate
-- audit completeness
-
-The benchmark must never present a blocked test case as proof of a production vulnerability. It measures the control under a defined fixture and configuration.
-
-## 14. API shape
+Railproof owns the call to the registered executor. An API that only returns `allowed: true` is too easy to bypass accidentally.
 
 ```python
-decision = await guardrail.inspect_tool_call(
-    name="send_email",
-    arguments={"to": "user@example.com", "body": body},
+result = await guarded_tools.call(
+    "send_email",
+    {"to": recipient, "body": body},
+    principal=principal,
     context=context,
 )
-
-if decision.requires_approval:
-    await approval_provider.request(decision)
-
-decision.enforce()
-result = await executor.call(name, arguments)
 ```
 
-The API should make the unsafe path difficult to write. The executor should not run until the decision has been enforced.
+The wrapper normalizes the action, evaluates policy, resolves required approval, records the decision, and calls the underlying tool only after all obligations pass.
 
-## 15. Repository structure
+## Scope
 
-```text
-railguard/
-├── README.md
-├── PROJECT_PLAN.md
-├── pyproject.toml
-├── src/railguard/
-│   ├── policy/
-│   ├── events/
-│   ├── detectors/
-│   ├── decisions/
-│   ├── integrations/
-│   └── audit/
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/
-├── examples/
-│   ├── basic_chat/
-│   ├── rag/
-│   └── tool_agent/
-└── docs/
-    ├── threat-model.md
-    ├── policy-reference.md
-    └── evaluation-methodology.md
-```
+### Version 0.1
 
-## 16. Quality and release gates
+- Python 3.11+
+- local library and CLI
+- YAML policy
+- framework-neutral tool registry
+- OpenAI-style function-call adapter
+- MCP adapter
+- exact argument constraints
+- principal and tenant context
+- trust and sensitivity labels
+- local provenance graph
+- deny and approval enforcement
+- JSONL evidence and deterministic replay
+- benchmark harness
 
-- Formatting, linting, typing, and tests pass in CI.
-- No default logs contain raw secrets.
-- No tool executes before its pre-execution decision.
-- Policy changes are covered by fixture tests.
-- Detector failures follow the configured fail-safe behavior.
-- Documentation states what each detector cannot establish.
-- Security findings are reproducible from committed fixtures.
-- Public examples use fake credentials and fake external systems.
+### Later
 
-## 17. Risks and decisions
+- Anthropic and framework-specific adapters
+- distributed policy decision service
+- signed policy bundles
+- external identity and approval providers
+- OPA and Cedar interoperability
+- persistent cross-session budgets
+- TypeScript SDK
 
-### Risk: becoming a NeMo clone
+### Not in scope
 
-Decision: do not reproduce broad conversational-flow features first. Focus the initial release on security policy enforcement at the tool and data boundaries, with evidence and evaluation as first-class features.
+- training safety classifiers
+- replacing model moderation
+- controlling general conversation flow
+- claiming complete prompt-injection prevention
+- sandboxing arbitrary code
+- replacing IAM, DLP, network controls, or transaction authorization
+- hosted management before the local contract is proven
 
-### Risk: winning only in a benchmark
+## Architecture
 
-Decision: measure the full developer workflow: installation, policy authoring, startup errors, pre-execution blocking, audit review, replay, and latency. A high detector score alone does not beat a mature framework.
+The design lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The critical split is compile time versus runtime.
 
-### Risk: making the policy language impressive but unusable
+Compile time validates policy and creates an immutable decision graph. Runtime evaluates normalized events against that graph. Model-backed detectors can add evidence, but they do not define authority.
 
-Decision: require every new policy feature to ship with a short example, a schema error example, and a test fixture. Keep the common path YAML-only.
+## Evidence standard
 
-### Risk: model-backed detectors create false confidence
+Every security claim requires:
 
-Decision: expose detector uncertainty, retain deterministic controls, and publish false-positive and false-negative measurements.
+- exact fixture and policy version
+- expected and actual decision
+- benign control
+- positive control where applicable
+- proof of whether the executor was reached
+- detector output separated from policy verdict
+- latency and external calls
+- known bypasses and unresolved cases
 
-### Risk: policy language becomes too complex
+The benchmark specification is in [docs/BENCHMARK.md](docs/BENCHMARK.md).
 
-Decision: start with YAML and composable named detectors. Add a flow language only when real policies cannot be expressed cleanly.
+## Competitive objective
 
-### Risk: integrations dominate the project
+The target is not “more features than NeMo.” The target is a documented win for agent-action security.
 
-Decision: keep a stable core event and decision API, then treat integrations as adapters.
+| Dimension | Alpha gate |
+|---|---|
+| Enforcement | 100% of denied benchmark actions stopped before executor entry |
+| Replay | 100% of deterministic decisions reproduced from evidence artifacts |
+| Policy mutation | Test suite kills at least 90% of supported policy mutations |
+| Safety | Zero raw seeded secrets in default logs |
+| Portability | Same policy passes against OpenAI-style and MCP adapters |
+| Usability | New user reaches first denied tool call in under 10 minutes |
+| Performance | Deterministic p95 overhead below 5 ms on the reference machine |
 
-### Risk: hosted control plane expands the scope
+Detector accuracy thresholds will be set per detector. A single aggregate accuracy number would hide the failure mode that matters.
 
-Decision: keep v0.1 self-hosted and local. Revisit hosted management only after SDK adoption and policy workflows are validated.
+## Delivery
 
-## 18. Public positioning
+[ROADMAP.md](ROADMAP.md) defines a 12-week, one-developer path to public alpha. Each milestone ends in running evidence, not document completion.
 
-Railguard is an open-source policy-as-code layer for inspectable LLM and agent security decisions.
+## Publication gate
 
-The strongest public proof will be:
+Do not publish until all four conditions hold:
 
-- a working tool-call block before execution
-- a policy explaining the decision
-- an audit event without secret leakage
-- a replayable evaluation showing both protection and failure cases
+1. The final name and package availability are verified.
+2. The license decision is confirmed.
+3. One end-to-end action is blocked before execution and replayed from evidence.
+4. The README contains measured results instead of superiority language.
 
-Do not market it as a complete solution to prompt injection. Market it as a practical enforcement and evaluation layer that makes security controls explicit.
+## Current state
 
-## 19. First build session
+Confirmed:
 
-1. Confirm the name and license.
-2. Create the Python package and test runner.
-3. Implement the event, decision, and policy contracts.
-4. Add one end-to-end fake-agent example.
-5. Write the first ten fixtures: five attack cases and five benign cases.
-6. Verify that a blocked tool call never reaches the executor.
+- product category
+- narrow competitive wedge
+- Python-first local alpha
+- tool boundary as the first enforcement point
+- evidence-first evaluation standard
 
-## 20. Competitive build sequence
+Proposed:
 
-The project should earn the “beats NeMo” claim in this order:
+- `Railproof` as the name
+- Apache-2.0 as the license
+- YAML as the first policy format
 
-1. Ship a five-minute quickstart that wraps one existing tool-calling agent.
-2. Demonstrate a denied tool call before execution with an exact audit event.
-3. Add approval gates and argument-level constraints that are easy to review.
-4. Add replayable attack and benign fixtures with false-positive and false-negative reporting.
-5. Add provider-neutral adapters and a clear migration path from ad hoc callbacks.
-6. Publish a side-by-side evaluation using the same scenarios and disclose where Railguard loses.
+Blocked:
 
-Do not build a dashboard, hosted policy service, or new flow language before these six steps work.
+- GitHub remote creation because the current `gh` authentication is invalid
+
+No implementation or benchmark result exists yet.
