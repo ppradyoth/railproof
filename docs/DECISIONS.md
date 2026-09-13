@@ -32,38 +32,42 @@ Status: accepted.
 
 No general superiority claim is allowed without a versioned public benchmark.
 
-## Proposed
+## Accepted implementation decisions
 
 ### D006: Use `Railproof` as the project name
 
-Status: proposed.
+Status: accepted.
 
-Reason: `Railguard` conflicts with an existing PyPI SDK. `Railproof` reflects the evidence and verification wedge. GitHub and package availability still need final verification.
+Reason: `Railguard` conflicts with an existing PyPI SDK. `Railproof` reflects the evidence and verification wedge. The repository is `ppradyoth/railproof`.
 
 ### D007: Use Apache-2.0
 
-Status: proposed.
+Status: accepted.
 
-Reason: permissive commercial use plus an explicit patent grant. Confirm before public release.
+Reason: permissive commercial use plus an explicit patent grant.
 
 ### D008: Use YAML with typed predicates
 
-Status: proposed.
+Status: accepted.
 
 Reason: easy review and strict validation. No arbitrary code or general expression language in alpha.
 
 ### D009: Support Python 3.11+
 
-Status: proposed.
+Status: accepted.
 
 Reason: modern typing and async support without carrying older-runtime compatibility work into alpha.
 
+### D010: Pin the comparison to NeMo 0.24.0
+
+Status: accepted.
+
+Reason: comparative claims must name the exact implementation and tested scope. The benchmark calls NeMo's real deterministic tool-call validator and does not model unsupported outcomes.
+
 ## Open
 
-- final package and repository name
-- exact policy schema library
-- sync API support in alpha or async-only core
-- evidence canonicalization format
-- approval signature format
-- reference machine for performance claims
-- public versus private GitHub repository
+- public release timing; the repository remains private during hardening
+- durable signing-key and nonce-store interfaces
+- policy bundle signature and evidence-chain formats
+- automatic provenance/label propagation design
+- package publication name verification on PyPI

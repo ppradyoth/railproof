@@ -41,24 +41,22 @@ The model is never a trusted authority.
 |---|---|---|
 | Unknown tool call | Default-deny tool registry | Executor spy remains untouched |
 | Schema-valid but unauthorized argument | Argument and context policy | Denied target never reaches executor |
-| Indirect prompt injection | Trust labels plus source-to-sink rule | Retrieved instruction cannot trigger protected sink |
-| Sensitive-data exfiltration | Sensitivity propagation and sink restriction | Seeded secret absent from external call |
+| Indirect prompt injection | Application-attested provenance plus source-to-sink rule | Retrieved value cannot select protected sink target |
+| Sensitive-data exfiltration | Application-attested sensitivity label and sink restriction | Seeded secret absent from external call |
 | Confused deputy | Principal and tenant binding | Cross-principal fixture denied |
 | Approval replay | Single-use nonce and action hash | Second execution denied |
 | Approval substitution | Exact argument and policy binding | Modified action denied |
 | Multi-step budget abuse | Session counters and budgets | Action crossing threshold denied |
 | Policy typo or unsupported feature | Compile-time rejection | Application does not start |
-| Rule shadowing | Compiler analysis and mutation tests | Weakening detected before release |
 | Audit leakage | Redaction and hashing by default | Seeded secrets absent from JSONL |
-| Direct executor bypass | Wrapped registry and integration test | Bypass path documented or blocked |
+| Direct executor bypass | Wrapped registry and narrow raw-executor ownership | Bypass path documented; host architecture must restrict access |
 
 ## Security invariants
 
 - No deny decision reaches executor entry.
 - No approval authorizes a different action hash.
-- No lower-trust event grants higher authority.
-- No sensitivity label disappears without a named declassification rule.
-- No deterministic deny is overridden by detector output.
+- No application-attested provenance rule is overridden by a later allow.
+- No application-attested sensitivity rule is overridden by a later allow.
 - No unsupported policy deploys silently.
 - No default evidence contains raw seeded secrets.
 
@@ -73,6 +71,8 @@ Railproof cannot:
 - replace tool-side authorization or transaction validation
 - guarantee a model will produce safe text
 - secure a compromised host process
+- verify that application-supplied labels or provenance are truthful
+- preserve limits or nonce replay state across process restart
 
 ## Test discipline
 

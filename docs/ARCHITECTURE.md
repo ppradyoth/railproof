@@ -1,162 +1,93 @@
 # Architecture
 
-## Design rule
+## Security invariant
 
-Separate policy compilation from runtime enforcement.
-
-The compiler answers whether a policy is valid and enforceable. The runtime answers whether one exact event is authorized. Neither delegates authority to an LLM.
-
-## Runtime flow
+An application must not receive an executable tool result unless the exact action passed the compiled policy and any required approval. Decisions never delegate authority to an LLM.
 
 ```text
-Agent or application
-        |
-        v
-Protocol adapter
-        |
-        v
-Event normalizer -----> Label and provenance resolver
-        |                         |
-        +------------+------------+
-                     v
-              Compiled policy
-                     |
-                     v
-              Decision engine
-                     |
-          +----------+----------+
-          |          |          |
-         deny     approval     allow
-          |          |          |
-          +----------+----------+
-                     v
-                Evidence sink
-                     |
-                     v
-              Wrapped executor
+Provider event -> adapter -> canonical Event -> DecisionEngine
+                                                | deny
+                                                | require approval
+                                                | allow
+                                                v
+                                         evidence record
+                                                v
+                                        wrapped executor
 ```
 
-The evidence sink records the decision before execution. It records executor start and completion as separate events. A missing completion event is observable. It is not rewritten as a successful block.
-
-## Components
+## Implemented components
 
 ### Policy compiler
 
-Parses versioned YAML into typed policy objects, resolves references, checks rule reachability, validates stages, and produces an immutable decision graph plus policy hash.
+`load_policy()` reads at most 1 MiB through a custom loader derived from PyYAML `SafeLoader`. It caps YAML aliases at 100 and rejects duplicate keys, unknown fields, non-string mapping keys, unsupported stages/operators, invalid JSON Schema, all schema references, duplicate rule/limit IDs, undeclared limit tools, and any unmatched default other than `deny`.
 
-It rejects:
+The compiler returns immutable policy objects and a SHA-256 hash over canonical JSON data. Rule order is stable by priority and ID.
 
-- unknown fields that affect security behavior
-- unsupported enforcement points
-- missing referenced labels or tools
-- duplicate rule IDs
-- allow rules shadowed by unconditional deny rules
-- approval rules without a binding contract
-- source-to-sink rules for sources or sinks the adapter cannot observe
+### Canonical event and hashing
 
-### Protocol adapters
+The event contains the principal, tenant, roles, session, tool, arguments, labels, and provenance. Canonicalization sorts object keys, rejects non-string keys, non-finite numbers, unsupported types, cycles, and nesting beyond 64 levels.
 
-Adapters translate provider or framework events into the canonical model. They do not implement policy.
+The action hash binds:
 
-The first two adapters are:
-
-- OpenAI-style function calls
-- MCP tool calls and results
-
-An adapter declares which enforcement stages and provenance fields it can guarantee. The compiler refuses a policy that depends on a guarantee the active adapter cannot provide.
-
-### Event normalizer
-
-Produces a canonical envelope:
-
-```json
-{
-  "event_id": "evt_01...",
-  "stage": "before_tool",
-  "session_id": "ses_01...",
-  "principal": {"id": "user_123", "tenant": "tenant_a"},
-  "action": {
-    "tool": "send_email",
-    "arguments": {"to": "review@example.com", "body": "..."}
-  },
-  "labels": {},
-  "parents": ["evt_00..."]
-}
-```
-
-Canonical serialization is required for policy hashing, action hashing, approvals, and replay.
-
-### Label and provenance resolver
-
-Labels describe data, not authority. Initial alpha labels:
-
-- `untrusted`
-- `user_controlled`
-- `retrieved`
-- `model_generated`
-- `sensitive`
-- `secret`
-- `tenant:<id>`
-
-Provenance links fields across events. The alpha can require explicit derivation from adapters or application hooks. It must not pretend to infer perfect data lineage from arbitrary model output.
+- policy hash
+- session ID
+- principal ID, tenant, and roles
+- tool and complete arguments
+- labels and provenance
 
 ### Decision engine
 
-Evaluates deterministic predicates over canonical events, labels, provenance, principal context, and session state.
+The engine evaluates locally with no model or network call. It validates arguments using JSON Schema Draft 2020-12, checks session limits, evaluates typed conditions, and applies fixed precedence:
 
-Model-backed detectors return evidence records. Policy decides how to use that evidence. A detector cannot directly execute, approve, or declassify an action.
+```text
+deny > require_approval > allow > unmatched deny
+```
+
+Conditions support equality, inequality, membership, numeric bounds, field labels, and explicit derivation sources. Labels and provenance are supplied by the application or adapter; Railproof does not infer them.
 
 ### Approval broker
 
-Creates a canonical action hash over principal, tenant, tool, arguments, policy hash, and expiry. The approval provider signs or attests that exact hash.
+The built-in broker uses HMAC-SHA-256 with a minimum 32-byte key. A token binds the action hash, policy hash, principal, approver, expiry, and random nonce. Verification rejects signature changes, action/policy/principal changes, naive or expired timestamps, malformed payloads, and nonce reuse.
 
-Any argument change creates a new action and requires a new decision.
+The broker is process-local. A production distributed deployment needs an external atomic nonce store and managed signing key.
 
 ### Wrapped executor
 
-The main API combines authorization and execution:
+`GuardedTools.call()` canonicalizes caller arguments once into isolated event and execution snapshots, constructs the event, locks state by session, records the decision, denies or verifies approval, atomically reserves limits, and only then invokes the registered sync or async executor with the authorized snapshot. Executor start, completion, and failure are distinct evidence records.
 
-```python
-result = await guarded_tools.call(
-    "send_email",
-    arguments,
-    principal=principal,
-    context=context,
-)
-```
+Holding the session lock through policy and reservation prevents concurrent calls from overspending a count or sum limit. The lock is released before the underlying tool runs while an in-flight lease prevents teardown. Session IDs must be non-empty, principal IDs must be non-empty, and the process rejects new sessions after a configurable capacity that defaults to 10,000. Applications release completed state with `close_session()`; teardown rejects sessions with active executions.
 
-This avoids the unsafe pattern where application code asks for a decision and then independently calls the tool.
+### Evidence
 
-### Evidence sink
+The in-memory and JSONL sinks record event/session IDs, a hashed principal, tool name, action/policy/decision hashes, outcome, matched rules, and reason codes. Raw arguments are not stored by the built-in sinks. The default in-memory sink retains the newest 10,000 records; JSONL is the durable append-only option.
 
-Writes append-only JSONL in alpha. Values marked sensitive are redacted or hashed before serialization. Full-content capture requires an explicit sink and policy.
+### Adapters and replay
 
-## State model
+The OpenAI adapter accepts one Chat Completions function-call object. The MCP adapter accepts one JSON-RPC 2.0 `tools/call` request. Both normalize into the same `Event`; policy remains protocol-independent.
 
-Alpha state is scoped to one session and one process. It supports:
-
-- action count by tool
-- cumulative numeric budget
-- prior decision lookup
-- approval nonce use
-- event parent links
-
-Distributed and cross-session state are later work.
+The replay CLI loads JSONL cases, reconstructs events and session snapshots, and compares actual outcomes with expected outcomes.
 
 ## Failure behavior
 
-| Failure | Before tool execution |
+| Failure | Behavior before execution |
 |---|---|
-| Invalid policy | Application startup fails |
-| Unsupported adapter guarantee | Application startup fails |
-| Malformed action | Deny |
-| Detector unavailable | Use the rule's declared failure behavior, default deny |
-| Approval unavailable | Do not execute |
-| Evidence sink unavailable | Do not execute for high-risk tools, configurable for low-risk tools |
-| Executor failure | Record failure, never report a policy block |
+| Invalid or oversized policy | Startup/compile error |
+| Unknown tool or malformed action | Deny |
+| Invalid arguments | Deny |
+| Session limit exceeded | Deny |
+| Approval unavailable, forged, expired, changed, or reused | Do not execute |
+| Decision evidence sink raises | Do not execute |
+| Executor missing | Do not execute |
+| Executor raises | Record failure and propagate |
 
-## Security boundary
+## Explicit non-goals for v0.1.0
 
-Railproof only controls tools called through its wrapped registry or a verified adapter interception point. Direct calls to the underlying tool bypass it.
+- no direct-call sandbox: code holding the raw executor can bypass Railproof
+- no automatic taint tracking or provenance attestation
+- no post-tool/tool-result rail
+- no argument rewrite
+- no persistent or distributed session state
+- no hosted control plane, UI, or policy distribution
+- no model-backed content safety detector
 
-Every integration document must state that boundary and include a bypass test.
+These constraints are security boundaries, not implied features.
