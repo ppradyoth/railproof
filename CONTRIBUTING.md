@@ -22,4 +22,4 @@ Do not put real credentials, private prompts, employer details, or live external
 
 ## Public security reports
 
-Do not open a public issue for a vulnerability that would expose users. GitHub private vulnerability reporting will be enabled before the repository is published.
+Do not open a public issue for a vulnerability that would expose users. Follow the private disclosure path in [SECURITY.md](SECURITY.md).

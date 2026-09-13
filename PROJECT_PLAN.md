@@ -58,13 +58,13 @@ The first alpha must:
 - intercept every registered tool call before execution
 - deny tools and argument values outside explicit policy
 - attach trust and sensitivity labels to normalized data
-- propagate labels through declared transformations
+- accept explicit field labels and derivation provenance from the integration
 - block prohibited source-to-sink flows
 - issue approvals bound to exact action hashes
 - reject invalid or incomplete policy at startup
 - emit secret-safe evidence for every decision
 - replay a decision without contacting a model
-- run adversarial, benign, and mutation tests from the CLI
+- run adversarial and benign tests plus deterministic replay from the CLI
 
 ## Security invariants
 
@@ -88,8 +88,8 @@ These are testable contracts, not marketing language.
 | Action | Tool name, target, arguments, and declared side effects |
 | Label | Trust, sensitivity, tenant, provenance, or policy metadata attached to data |
 | Policy | Versioned rules evaluated at named enforcement stages |
-| Decision | Allow, deny, rewrite, require approval, or error |
-| Obligation | Required work before execution, such as redact, log, or obtain approval |
+| Decision | Allow, deny, or require approval |
+| Obligation | Required approval before execution |
 | Evidence | Matched fields, rule IDs, hashes, detector results, and event links |
 
 ## Runtime boundary
@@ -120,7 +120,7 @@ The wrapper normalizes the action, evaluates policy, resolves required approval,
 - exact argument constraints
 - principal and tenant context
 - trust and sensitivity labels
-- local provenance graph
+- explicit field provenance assertions
 - deny and approval enforcement
 - JSONL evidence and deterministic replay
 - benchmark harness
@@ -174,7 +174,7 @@ The target is not “more features than NeMo.” The target is a documented win 
 |---|---|
 | Enforcement | 100% of denied benchmark actions stopped before executor entry |
 | Replay | 100% of deterministic decisions reproduced from evidence artifacts |
-| Policy mutation | Test suite kills at least 90% of supported policy mutations |
+| Policy mutation | Deferred beyond v0.1.0 |
 | Safety | Zero raw seeded secrets in default logs |
 | Portability | Same policy passes against OpenAI-style and MCP adapters |
 | Usability | New user reaches first denied tool call in under 10 minutes |
@@ -197,22 +197,22 @@ Do not publish until all four conditions hold:
 
 ## Current state
 
-Confirmed:
+Implemented in v0.1.0:
 
-- product category
-- narrow competitive wedge
-- Python-first local alpha
-- tool boundary as the first enforcement point
-- evidence-first evaluation standard
+- private GitHub repository and Apache-2.0 package
+- strict YAML compiler and deterministic policy hash
+- allow, deny, approval, argument policy, labels, provenance, and session limits
+- wrapped sync/async executor path and secret-safe evidence
+- OpenAI tool-call and MCP `tools/call` adapters
+- CLI validation, checks, and deterministic JSONL replay
+- 110 tests with 94.18% branch coverage
+- pinned NeMo Guardrails 0.24.0 comparison: Railproof 10/10, NeMo built-in 5/10
+- Ruff, formatting, type, test, build, audit, and benchmark CI jobs
 
-Proposed:
+Explicitly deferred:
 
-- `Railproof` as the name
-- Apache-2.0 as the license
-- YAML as the first policy format
-
-Blocked:
-
-- GitHub remote creation because the current `gh` authentication is invalid
-
-No implementation or benchmark result exists yet.
+- automatic label propagation or provenance attestation
+- compiler reachability/shadow analysis and policy mutation testing
+- tool-result enforcement
+- persistent/distributed state and approval replay storage
+- hosted service and UI

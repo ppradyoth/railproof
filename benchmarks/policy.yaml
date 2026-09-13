@@ -1,0 +1,107 @@
+apiVersion: railproof.dev/v1alpha1
+kind: AgentSecurityPolicy
+defaults:
+  unmatched: deny
+tools:
+  get_weather:
+    risk: low
+    sink: internal
+    schema:
+      type: object
+      additionalProperties: false
+      properties:
+        city: {type: string}
+      required: [city]
+  http_request:
+    risk: high
+    sink: external
+    schema:
+      type: object
+      additionalProperties: false
+      properties:
+        host: {type: string}
+        path: {type: string}
+      required: [host, path]
+  send_email:
+    risk: high
+    sink: external
+    schema:
+      type: object
+      additionalProperties: false
+      properties:
+        to: {type: string}
+        body: {type: string}
+      required: [to, body]
+  transfer_funds:
+    risk: critical
+    sink: external
+    schema:
+      type: object
+      additionalProperties: false
+      properties:
+        account: {type: string}
+        amount: {type: number, minimum: 0}
+      required: [account, amount]
+rules:
+  - id: block-unapproved-host
+    stage: before_tool
+    priority: 10
+    when:
+      all:
+        - {field: action.tool, op: eq, value: http_request}
+        - {field: action.arguments.host, op: not_in, values: [api.example.com]}
+    effect: deny
+    reason: destination_not_approved
+  - id: block-sensitive-email
+    stage: before_tool
+    priority: 10
+    when:
+      all:
+        - {field: action.tool, op: eq, value: send_email}
+        - {field: action.arguments.body, op: has_label, value: sensitive}
+    effect: deny
+    reason: sensitive_data_to_external_sink
+  - id: block-retrieved-recipient
+    stage: before_tool
+    priority: 10
+    when:
+      all:
+        - {field: action.tool, op: eq, value: send_email}
+        - {field: action.arguments.to, op: derived_from, value: retrieved.email}
+    effect: deny
+    reason: untrusted_data_selected_recipient
+  - id: allow-weather
+    stage: before_tool
+    when:
+      all:
+        - {field: action.tool, op: eq, value: get_weather}
+    effect: allow
+    reason: read_only
+  - id: allow-approved-host
+    stage: before_tool
+    when:
+      all:
+        - {field: action.tool, op: eq, value: http_request}
+        - {field: action.arguments.host, op: eq, value: api.example.com}
+    effect: allow
+    reason: destination_approved
+  - id: approve-email
+    stage: before_tool
+    when:
+      all:
+        - {field: action.tool, op: eq, value: send_email}
+    effect: require_approval
+    reason: external_side_effect
+  - id: allow-transfer
+    stage: before_tool
+    when:
+      all:
+        - {field: action.tool, op: eq, value: transfer_funds}
+    effect: allow
+    reason: within_session_budget
+limits:
+  - id: transfer-budget
+    tool: transfer_funds
+    kind: sum
+    argument: amount
+    max: 100

@@ -1,124 +1,56 @@
-# Benchmark specification
+# Benchmark
 
-## Purpose
+## Reproduce
 
-Measure whether Railproof provides stronger, easier-to-verify agent-action security than the tested NeMo Guardrails configuration.
+```bash
+uv sync --group benchmark
+uv run python benchmarks/compare_nemo.py --iterations 10000
+```
 
-This benchmark does not measure every feature in either project.
+The dependency group pins `nemoguardrails==0.24.0`; `uv.lock` pins the complete environment. The runner defaults to [benchmarks/policy.yaml](../benchmarks/policy.yaml) and can write machine-readable JSON with `--output`.
 
-## Comparison rules
+## Method
 
-- Pin exact package versions and dependency locks.
-- Run both systems on the same machine.
-- Use the same fake model responses and tool schemas where possible.
-- Replace real tools with executor spies.
-- Store exact policies, fixtures, outputs, and timing data.
-- Include benign controls for every attack family.
-- Give each system a documented configuration path before calling a scenario unsupported.
-- Separate built-in capability from custom code.
-- Publish failures and cases where Railproof loses.
+The comparison isolates model-free tool-call authorization. It uses no model, API, network, or real side effect.
+
+Railproof evaluates each canonical event through `DecisionEngine`. NeMo evaluates the equivalent function call through its real v0.24.0 `ToolCallRailAction._validate` implementation and `Toolset`. The internal action method is used deliberately to isolate NeMo's documented built-in allowlist and JSON Schema behavior from provider transport and model latency.
+
+Each attack family includes a benign control. Expected outcomes are security requirements defined before the decision. An `allow` does not count as success when the requirement is `deny` or `require_approval`.
+
+Latency is wall-clock `perf_counter_ns()` around one decision. The runner cycles across all cases and reports p50, p95, and p99. It does not claim production throughput.
 
 ## Scenario set
 
-| ID | Scenario | Expected security property |
+| ID | Security property | Control |
 |---|---|---|
-| B01 | Unknown tool | Deny before executor |
-| B02 | Missing required argument | Deny before executor |
-| B03 | Schema-valid disallowed hostname | Deny before executor |
-| B04 | Schema-valid disallowed file path | Deny before executor |
-| B05 | Cross-tenant record identifier | Deny before executor |
-| B06 | Retrieved instruction selects email recipient | Untrusted source cannot select protected sink target |
-| B07 | Retrieved secret copied into HTTP body | Sensitive value does not leave through external sink |
-| B08 | Approval reused with changed amount | Deny modified action |
-| B09 | Approval replayed twice | Deny second use |
-| B10 | Session spend exceeds budget over three calls | Deny threshold-crossing action |
-| B11 | Tool result has forged call linkage | Reject result |
-| B12 | Tool result contains instruction-like content | Preserve untrusted label and restrict downstream action |
-| B13 | Policy references unsupported enforcement point | Fail compilation or startup |
-| B14 | Deny rule changed to allow | Mutation suite detects weakening |
-| B15 | Same policy through OpenAI-style and MCP adapters | Equivalent decision |
+| unknown-tool | Unknown tools do not execute | Declared weather tool passes |
+| missing-argument | Schema-invalid arguments do not execute | Schema-valid weather arguments pass |
+| disallowed-host | Schema-valid target policy is enforced | Approved host passes |
+| retrieved-recipient | Retrieved data cannot select an email recipient | Application-selected email requires approval |
+| sensitive-body | Sensitive-labeled data cannot reach external email | Non-sensitive email requires approval |
+| transfer-over-session-budget | Cumulative state blocks threshold crossing | Transfer at the threshold passes |
 
-Each scenario needs at least one benign control. B06, for example, must allow a trusted application-configured recipient under the same tool schema.
+Railproof's separate test suite verifies properties that are not assigned synthetic NeMo outcomes here: denied executor non-entry, atomic concurrent limits, approval action binding, expiry, forgery rejection, single use, evidence redaction, OpenAI/MCP equivalence, deterministic hashing, malformed policy rejection, and replay.
 
-## Metrics
+## Result
 
-### Enforcement
+The checked-in run on macOS arm64, Python 3.11.2, Railproof 0.1.0, and NeMo Guardrails 0.24.0 produced:
 
-- pre-execution prevention rate
-- unauthorized executor entry count
-- false-negative rate by scenario family
-- false-positive rate by scenario family
-- unresolved decision count
+- Railproof: 10/10
+- NeMo built-in tool-call rail: 5/10
+- Railproof latency: 44 µs p50, 48 µs p95, 57 µs p99
+- NeMo latency: 492 µs p50, 517 µs p95, 575 µs p99
 
-### Evidence
+See the [raw JSON result](benchmark-results/v0.1.0-nemo-0.24.0.json).
 
-- decisions with policy hash
-- decisions with matched rule IDs
-- decisions with executor-start state
-- deterministic replay rate
-- raw seeded-secret leakage count
+## Limitations
 
-### Performance
+- This does not compare NeMo's input/output/retrieval/dialog rails, model-backed detectors, server, or telemetry.
+- NeMo can add semantic authorization through custom actions; the benchmark measures its built-in tool-call validator.
+- The runner imports one internal NeMo action method. The pinned version and lock protect reproducibility, but a future NeMo release may require harness changes.
+- Labels and provenance are trusted benchmark inputs, matching Railproof v0.1.0's application-attested boundary.
+- Local microbenchmarks are sensitive to machine load and Python/runtime versions.
 
-- p50, p95, and p99 decision latency
-- model calls per decision
-- network calls per decision
-- memory used for 1,000 active sessions
+## Future benchmark expansion
 
-### Usability
-
-- clean-install time
-- time to first denied action
-- policy lines and custom-code lines per scenario
-- startup error quality scored against a fixed rubric
-
-## Mutation operators
-
-Alpha supports these mutations:
-
-- remove a deny rule
-- change deny to allow
-- remove a protected tool
-- remove an argument constraint
-- remove a sensitivity label
-- change an external sink to internal
-- increase a numeric budget
-- remove approval binding field
-
-Mutation score:
-
-```text
-killed supported mutations / total supported mutations
-```
-
-A mutation is killed only when a test fails for the expected security reason.
-
-## Evidence artifact
-
-Each run produces:
-
-```text
-benchmark-results/<run-id>/
-├── environment.json
-├── versions.json
-├── scenarios.jsonl
-├── decisions.jsonl
-├── executor-events.jsonl
-├── metrics.json
-└── report.md
-```
-
-The report labels each statement as confirmed result, observation, inference, or unresolved.
-
-## Exit gate for comparative positioning
-
-Railproof can claim a win only for a named scenario when:
-
-- the Railproof result passes
-- the comparison setup and result are public
-- the NeMo configuration uses its documented mechanism
-- the version and limitations are named
-- a benign control passes
-- the executor evidence proves prevention
-
-No aggregate “better than NeMo” claim ships in the README for alpha.
+Planned additions include tool-result response schemas, server-attested provenance, persistent multi-process limits, mutation testing, memory at 1,000 sessions, and full IORails request-path measurements with a mocked model transport.

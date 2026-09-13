@@ -1,6 +1,12 @@
 # Roadmap
 
-Assumption: one primary developer, 12 weeks to public alpha.
+## v0.1.0 status
+
+The initial 12-week outline below was compressed into the first implementation pass. The strict policy compiler, decision engine, wrapped executor, explicit labels/provenance, approval binding, session limits, adapters, evidence, replay CLI, packaging, CI, and NeMo comparison are implemented.
+
+Still open from the original plan: rule reachability/shadow analysis, automatic label propagation, tool-result enforcement, policy mutation testing, adapter capability declarations, full clean-machine usability timing, and public alpha publication.
+
+Original assumption: one primary developer, 12 weeks to public alpha.
 
 ## Week 1: contract
 

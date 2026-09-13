@@ -1,87 +1,65 @@
-# Competitive analysis
+# NeMo Guardrails comparison
 
-Research date: 2026-09-12.
+Research and benchmark date: 2026-09-13.
 
-## Correction to the original plan
+## What NeMo already does well
 
-NeMo Guardrails already provides broad input, retrieval, dialog, execution, and output rails. It also has policy evaluation, an Eval UI, OpenTelemetry tracing, tool-call support, and a server.
+NeMo Guardrails is broader than Railproof. It provides input, retrieval, dialog, execution, and output rails; model-backed safety integrations; a server; evaluation; and OpenTelemetry tracing.
 
-So Railproof cannot differentiate on “configurable rails,” “tool support,” “evaluation,” “tracing,” or “provider support” as generic claims.
+NeMo v0.24.0 also has two experimental, model-free IORails checks for OpenAI Chat Completions tool traffic:
 
-## NeMo baseline
+- tool calls: declared-name allowlist and JSON Schema arguments
+- tool results: call linkage, name consistency, and content shape
 
-| Confirmed capability | Evidence |
-|---|---|
-| Input, retrieval, dialog, execution, and output rails | [Architecture overview](https://docs.nvidia.com/nemo/guardrails/about-nemo-guardrails-library/how-it-works) |
-| YAML, Colang, custom actions, SDK, and server | [Configuration overview](https://docs.nvidia.com/nemo/guardrails/configure-guardrails/overview) |
-| Policy evaluation for compliance, resource use, and latency | [Evaluate configuration](https://docs.nvidia.com/nemo/guardrails/evaluation/evaluate-configuration) |
-| OpenTelemetry tracing and optional content capture | [Tracing](https://docs.nvidia.com/nemo/guardrails/observability/tracing) |
-| Local tool name and JSON Schema validation | [Tool calling](https://docs.nvidia.com/nemo/guardrails/configure-guardrails/guardrail-catalog/tool-calling) |
+Its documentation says IORails does not execute the application tool. Tool-result validation is structural, not response-schema, content-safety, or server-provenance validation. Tool rails are excluded from `check()` and `check_async()`. Incompatible configurations can fall back unless `require_iorails=True` is used.
 
-## Documented tool-rail boundaries we can target
+Sources: [NeMo v0.24.0 tool-calling documentation](https://github.com/NVIDIA-NeMo/Guardrails/blob/v0.24.0/docs/configure-rails/guardrail-catalog/tool-calling.mdx), [tool-call validator source](https://github.com/NVIDIA-NeMo/Guardrails/blob/v0.24.0/nemoguardrails/guardrails/actions/tool_call_action.py), and [tool-result validator source](https://github.com/NVIDIA-NeMo/Guardrails/blob/v0.24.0/nemoguardrails/guardrails/actions/tool_result_action.py).
 
-These are documented limits or behavior, not vulnerability claims.
+## The tested wedge
 
-- Tool-call rails are experimental and limited to the IORails engine.
-- The documented IORails tool path supports the OpenAI Chat Completions wire format.
-- Tool-call validation checks the declared tool name and JSON Schema arguments.
-- Tool-result validation checks structural linkage and well-formed content. It does not enforce a response schema, content safety, or server-verified provenance.
-- `check()` and `check_async()` do not run tool-call or tool-result rails.
-- An incompatible IORails configuration can fall back to the older engine unless strict construction is requested.
+Railproof targets deterministic action authorization after a tool call is structurally valid:
 
-Source: [NeMo tool-calling documentation](https://docs.nvidia.com/nemo/guardrails/configure-guardrails/guardrail-catalog/tool-calling).
+- destination and argument policy
+- explicit data labels and provenance
+- principal and tenant context
+- action-bound, expiring, single-use approval
+- atomic cross-step limits
+- authorization coupled to the executor
+- deterministic evidence and replay
+- OpenAI and MCP normalization
 
-## Other products invalidate an easy wedge
+## Measured result
 
-Capability-based authorization alone is not new.
+The checked-in runner invokes NeMo v0.24.0's real `ToolCallRailAction` with the same tool names, arguments, and JSON Schemas used by Railproof.
 
-The `agent-policy-engine` project claims deterministic policy, action registries, authority tokens, provenance, runtime state, MCP scanning, approvals, and external policy adapters. Another TypeScript project with the same name claims spend limits, authority levels, path protection, and pre-tool-call decisions.
+| Case | Expected | Railproof | NeMo built-in |
+|---|---|---|---|
+| Unknown tool | deny | deny | deny |
+| Missing required argument | deny | deny | deny |
+| Benign weather call | allow | allow | allow |
+| Schema-valid disallowed host | deny | deny | allow |
+| Schema-valid approved host | allow | allow | allow |
+| Retrieved data selects recipient | deny | deny | allow |
+| Sensitive body reaches external email | deny | deny | allow |
+| Benign email requires approval | require approval | require approval | allow |
+| Session transfer exceeds budget | deny | deny | allow |
+| Session transfer stays in budget | allow | allow | allow |
 
-These are product claims from their public project pages. They have not been independently tested here.
+Result: Railproof 10/10; NeMo built-in tool-call validation 5/10. Both systems passed all shared structural checks and benign controls.
 
-- [Python Agent Policy Engine](https://pypi.org/project/agent-policy-engine/1.0.2/)
-- [TypeScript agent-policy-engine](https://github.com/Princeu3/agent-policy-engine)
+The 10,000-iteration local timing run measured:
 
-Railproof therefore needs the combined wedge of enforceable information flow, compile-time policy verification, action-bound approval, deterministic replay, and policy mutation testing.
+| Engine | p50 | p95 | p99 |
+|---|---:|---:|---:|
+| Railproof v0.1.0 | 44 µs | 48 µs | 57 µs |
+| NeMo Guardrails v0.24.0 tool-call validator | 492 µs | 517 µs | 575 µs |
 
-## Category Railproof should own
+Raw evidence: [v0.1.0 versus NeMo 0.24.0](benchmark-results/v0.1.0-nemo-0.24.0.json).
 
-**Verifiable security contracts for agent actions.**
+## Claim boundary
 
-Not a conversational flow language. Not a bag of safety classifiers. Not a proxy that returns a risk score.
+Confirmed: Railproof beats NeMo Guardrails 0.24.0's built-in deterministic tool-call validator on this checked-in semantic authorization benchmark.
 
-The project wins when a security engineer can prove:
+Not established: that Railproof is better at conversational safety, jailbreak detection, content moderation, model integrations, serving, tracing, or every custom NeMo configuration. NeMo can implement additional checks with custom actions. Railproof currently has no equivalent to much of NeMo's broader surface.
 
-1. which data influenced an action
-2. which authority allowed or denied it
-3. whether the action reached the executor
-4. whether policy tests detect a weakened control
-5. whether the same contract holds across adapters
-
-## Fair comparison matrix
-
-| Scenario | NeMo baseline | Railproof target |
-|---|---|---|
-| Unknown tool | Name allowlist | Name allowlist |
-| Invalid arguments | JSON Schema | JSON Schema |
-| Disallowed recipient with valid schema | Custom implementation required | Built-in typed argument policy |
-| Untrusted retrieved value becomes recipient | Custom implementation required | Built-in provenance and flow rule |
-| Approval reused after argument change | Custom implementation required | Action-bound single-use approval |
-| Cross-step spend limit | Custom implementation required | Built-in session state policy |
-| Tool result provenance | Structural linkage | Adapter-attested source plus labels |
-| Policy typo | Configuration-dependent behavior | Compile failure |
-| Weakened policy | User-authored evaluation | Built-in mutation testing |
-| Decision replay | Trace and evaluation tooling | Offline deterministic replay artifact |
-| MCP tool path | Not the documented IORails wire format | First-release adapter target |
-
-“Custom implementation required” does not mean NeMo cannot support the scenario. It means the documented built-in tool rail does not establish the target property by itself.
-
-## Claim policy
-
-Before public alpha, say:
-
-> Railproof is designed to provide verifiable security contracts for agent actions.
-
-After the benchmark, a comparative claim can name only the tested version, scenario, configuration, and result.
-
-Never say “beats NeMo” without the benchmark artifact.
+The product claim is therefore: **stronger built-in, model-free security contracts for agent actions**, not “better than NeMo at everything.”

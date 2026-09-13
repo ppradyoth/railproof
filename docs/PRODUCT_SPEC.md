@@ -1,95 +1,87 @@
 # Product specification
 
-## Contract
+## v0.1.0 contract
 
-Railproof receives a normalized event and policy context, evaluates a compiled policy, enforces obligations, and returns a structured result. For tool calls, Railproof owns the path to the executor.
-
-## Decision outcomes
+Railproof receives a normalized pre-tool event, evaluates a compiled policy, enforces any approval requirement, atomically reserves session limits, records evidence, and invokes a registered executor only after authorization.
 
 | Outcome | Runtime behavior |
 |---|---|
-| `allow` | Execute after required non-blocking obligations finish |
-| `deny` | Record the verdict and do not call the executor |
-| `rewrite` | Produce new arguments, rerun policy, then require an allow decision |
-| `require_approval` | Pause and bind approval to the exact action hash |
-| `error` | Follow the policy's explicit failure mode, with deny as the default for tool execution |
+| `allow` | Reserve applicable limits and execute |
+| `deny` | Record the verdict and do not execute |
+| `require_approval` | Return an exact-action challenge; execute only after token verification |
 
-No implicit allow outcome exists.
+No implicit allow exists. Deny takes precedence over approval, which takes precedence over allow. An unmatched action is denied.
 
-## Functional requirements
+## Implemented requirements
 
-### Policy loading
+### Policy
 
-- RP-POL-001: Validate schema version, stages, effects, predicates, references, and unique IDs at startup.
-- RP-POL-002: Reject unsupported predicates and unknown enforcement stages.
-- RP-POL-003: Detect rules shadowed by unconditional earlier rules.
-- RP-POL-004: Produce an immutable policy hash.
-- RP-POL-005: Explain the compiled rule order without running an agent.
+- versioned `railproof.dev/v1alpha1` YAML
+- safe loading, duplicate-key rejection, 1 MiB size limit, and closed fields
+- declared tools with JSON Schema Draft 2020-12, risk, and sink metadata
+- typed predicates: `eq`, `neq`, `in`, `not_in`, `lte`, `gte`, `has_label`, `derived_from`
+- deterministic ordering and policy hash
+- startup rejection for unsupported stages, operators, effects, fields, and schema references
 
-### Tool enforcement
+### Enforcement
 
-- RP-TOOL-001: Register tools with JSON Schema, risk, side effects, source/sink metadata, and an executor.
-- RP-TOOL-002: Reject unknown tools before execution.
-- RP-TOOL-003: Validate arguments before policy evaluation.
-- RP-TOOL-004: Enforce exact values, sets, ranges, hostnames, path roots, recipients, and tenant boundaries.
-- RP-TOOL-005: Support session counters and budgets.
-- RP-TOOL-006: Prevent direct access to an executor through the documented integration path.
-
-### Provenance and labels
-
-- RP-DATA-001: Attach labels to user input, retrieved chunks, model output, tool arguments, and tool results.
-- RP-DATA-002: Track declared derivation between source fields and destination fields.
-- RP-DATA-003: Prevent untrusted content from adding authority labels.
-- RP-DATA-004: Prevent sensitivity labels from disappearing without an explicit declassification rule.
-- RP-DATA-005: Preserve tenant labels across transformations.
+- framework-neutral registry for sync and async executors
+- unknown-tool and argument-schema rejection before execution
+- rules over action arguments, principal fields, roles, tool metadata, labels, provenance, call counts, and sums
+- atomic process-local count and numeric-sum budgets by session
+- bounded in-memory session tables with a secure default capacity of 10,000
+- decision evidence before execution and separate executor started/completed/failed evidence
 
 ### Approval
 
-- RP-APR-001: Bind approval to principal, tool, canonical arguments, policy hash, and expiry.
-- RP-APR-002: Make approvals single use by default.
-- RP-APR-003: Reject modified, expired, replayed, or cross-tenant approvals.
-- RP-APR-004: Record the approver identity without placing approval secrets in logs.
+- HMAC-SHA-256 token with a minimum 32-byte signing key
+- binding to action hash, policy hash, principal, approver, expiry, and nonce
+- rejection of modified, forged, malformed, expired, reused, and cross-principal tokens
 
-### Evidence and replay
+### Adapters and replay
 
-- RP-EVD-001: Emit event ID, decision ID, policy hash, matched rule IDs, outcome, obligations, and timing.
-- RP-EVD-002: Hash or redact sensitive values by default.
-- RP-EVD-003: Separate detector output from the final policy verdict.
-- RP-EVD-004: Record whether the executor started and completed.
-- RP-EVD-005: Reproduce deterministic decisions from a fixture and compiled policy.
+- OpenAI Chat Completions function-call normalization
+- MCP JSON-RPC 2.0 `tools/call` normalization
+- CLI commands: `validate`, `check`, and `replay`
+- JSONL fixtures with expected versus actual outcomes
 
-### Testing
+### Evidence
 
-- RP-TST-001: Run adversarial and benign fixtures from the CLI.
-- RP-TST-002: Report false positives, false negatives, unresolved cases, and pre-execution prevention.
-- RP-TST-003: Mutate supported policy constructs and report whether tests detect the weakening.
-- RP-TST-004: Verify that test fixtures do not call real external systems.
+- built-in in-memory and append-only JSONL sinks
+- bounded in-memory retention with a 10,000-record default
+- event/session/tool identifiers, principal hash, policy/action/decision hashes, rules, reasons, and outcome
+- no raw action arguments, approval token, prompt, or tool result in built-in evidence
 
-## Non-functional requirements
+## Non-functional gates
 
-- RP-NFR-001: Deterministic checks add less than 5 ms p95 on the reference benchmark.
-- RP-NFR-002: Core runtime works without a model or network call.
-- RP-NFR-003: Sync and async applications receive equivalent decisions.
-- RP-NFR-004: Concurrent sessions do not share principal, tenant, label, budget, or approval state.
-- RP-NFR-005: Policy and evidence formats are versioned.
-- RP-NFR-006: Default logging contains no raw prompt, tool argument, result, secret, or approval token.
+- Python 3.11, 3.12, and 3.13 CI matrix
+- no model or network call in the core decision path
+- Ruff and formatter clean
+- `ty` type check clean
+- at least 90% branch coverage; current measured coverage is 94.18%
+- deterministic p95 below 5 ms; current local benchmark is 48 µs
+- dependency audit and locked build in CI
+- GitHub Actions pinned to commit SHAs with read-only repository permissions
 
-## Policy semantics
+## Security boundaries
 
-The first policy format uses a closed set of typed predicates. It does not execute arbitrary Python, templates, or shell expressions.
+- Only calls through `GuardedTools` are controlled.
+- The host application attests labels and provenance; v0.1.0 does not infer them.
+- State and nonce replay protection are process-local and reset on restart.
+- The built-in approval broker is not a remote human-approval service.
+- Rules compare fields to policy constants; field-to-field comparison is not implemented.
+- Evidence files are append-only by behavior, not tamper-evident or remotely attested.
+- Tool results and model text are outside the v0.1.0 enforcement stage.
 
-Precedence:
+## Deferred requirements
 
-1. invalid event or policy error
-2. deterministic deny
-3. required approval
-4. rewrite
-5. allow
+- automatic taint/label propagation and declassification
+- adapter capability declarations and compile-time observability checks
+- shadowed/unreachable rule analysis
+- policy mutation testing
+- tool-result schema, safety, and provenance checks
+- persistent/distributed limits and approval nonces
+- signed policy bundles and remote policy distribution
+- hosted decision service, dashboard, TypeScript SDK, and additional provider adapters
 
-A later allow cannot override a deny. A rewrite must pass through policy again. Approval satisfies one obligation but cannot erase an unrelated deny.
-
-## Definition of alpha
-
-Alpha means all P0 requirements have tests, the benchmark harness runs locally, and the same action policy works through one OpenAI-style adapter and one MCP adapter.
-
-Alpha does not mean production ready.
+Alpha means the implemented contract is runnable, tested, benchmarked, and explicit about its boundary. It does not mean production ready.
