@@ -216,7 +216,23 @@ railproof replay policy.yaml fixtures.jsonl
 
 `validate` compiles a policy and prints its hash. `check` evaluates one event. `replay` compares actual outcomes with expected outcomes and returns a failing exit code when fixtures disagree.
 
-## Quick start
+## Install
+
+Once the first release is published, install Railproof from PyPI:
+
+```bash
+python -m pip install railproof
+```
+
+Or with uv:
+
+```bash
+uv add railproof
+```
+
+The package includes the runtime library and the `railproof` command. No repository clone is needed to use it.
+
+## Quick start from source
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
@@ -296,6 +312,7 @@ The benchmark uses NeMo Guardrails 0.24.0’s real deterministic `ToolCallRailAc
 | `docs/` | Architecture, product specification, threat model, competitive analysis, and benchmark evidence |
 | `PROJECT_PLAN.md` | Product direction and staged roadmap |
 | `.github/workflows/ci.yml` | Python quality matrix, dependency audit, and benchmark gate |
+| `.github/workflows/publish.yml` | Tag-triggered, OIDC-based PyPI publishing |
 
 ## Development
 
