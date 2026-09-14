@@ -1,28 +1,222 @@
 # Railproof
 
-Verifiable security contracts for AI agent actions.
+![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Apache-2.0 license](https://img.shields.io/badge/license-Apache--2.0-green)
+![110 tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)
+![94.18% branch coverage](https://img.shields.io/badge/branch%20coverage-94.18%25-brightgreen)
 
-Railproof is a fail-closed policy engine and wrapped tool executor. It authorizes the exact tool, arguments, principal, labels, provenance, approval, and session budget before application code runs.
+## The short version
 
-## Why it exists
+AI agents can now send emails, move money, call APIs, modify tickets, and touch production systems.
 
-Model guardrails and JSON Schema validation answer useful questions, but not the whole authorization question. A schema-valid request can still send data to the wrong host, let retrieved content choose an email recipient, exceed a session budget, or reuse an approval for a modified action.
+The problem is not whether the model can choose a tool. The problem is whether that exact action should be allowed.
 
-Railproof v0.1.0 adds those controls without an LLM call:
+Railproof puts a deterministic security contract in front of every tool call. It checks the tool, complete arguments, user, tenant, roles, data labels, provenance, approvals, and session budgets before application code runs.
 
-- strict, versioned YAML policy that rejects unknown fields and unsafe defaults
-- deterministic deny-over-approval-over-allow decisions
-- JSON Schema Draft 2020-12 argument validation
-- semantic rules over arguments, principals, tool risk, sinks, labels, provenance, and state
-- HMAC-signed approvals bound to one action, policy, principal, expiry, and nonce
-- atomic per-session count and sum limits
-- bounded in-memory session state to prevent unbounded attacker-controlled growth
-- a wrapped registry that couples authorization to execution
-- bounded redacted evidence with policy, action, and decision hashes
-- OpenAI Chat Completions and MCP `tools/call` event adapters
-- offline JSONL replay and a CLI
+If the action is not explicitly allowed, it does not execute.
 
-## Run it
+## Why product teams need this
+
+Most guardrails answer one of these questions:
+
+- Is the request safe to discuss?
+- Does the tool call match a JSON shape?
+- Is this tool on an allowlist?
+
+Those checks are useful, but they do not answer the business question:
+
+> “Should this agent be allowed to perform this exact operation for this user, with this data, in this session, right now?”
+
+A request can be perfectly valid JSON and still be wrong. It can send data to the wrong host, use retrieved content as an email recipient, exceed a spending budget, or reuse an approval after the action changes.
+
+Railproof is the enforcement layer for that decision.
+
+## What this repository covers
+
+This repository contains the complete v0.1.0 alpha implementation:
+
+| Area | What is included |
+|---|---|
+| Policy | A strict, versioned YAML policy language with deny-by-default behavior |
+| Authorization | Deterministic rules over actions, users, tenants, roles, tools, sinks, labels, provenance, and session state |
+| Execution | A wrapped tool registry that cannot run a tool call before the decision is made |
+| Approvals | One-time HMAC approval tokens bound to the exact action, policy, principal, expiry, and nonce |
+| Budgets | Atomic per-session call-count and numeric-sum limits |
+| Evidence | Bounded redacted records with policy, action, and decision hashes |
+| Integrations | Normalizers for OpenAI Chat Completions function calls and MCP `tools/call` requests |
+| Testing | Adversarial, concurrency, property-based, replay, CLI, and integration tests |
+| Operations | CLI validation, single-event checks, JSONL replay, locked builds, dependency audits, and CI |
+| Benchmarking | A reproducible comparison against NeMo Guardrails 0.24.0’s built-in tool-call validator |
+
+## What this means for a product owner
+
+You define the rules once. Every connected agent and tool call goes through the same decision contract.
+
+### 1. Stop actions that are technically valid but business-invalid
+
+JSON Schema can confirm that an email has a `to` field and a `body`. Railproof can additionally say:
+
+- never send sensitive data to an external sink
+- never let retrieved content choose an email recipient
+- only call a transfer tool within a session budget
+- allow weather lookups but require approval for external email
+- deny unknown tools and unmatched actions
+
+The policy does not ask the model whether the action is safe. The model has no authority to override it.
+
+### 2. Require approval for high-impact actions
+
+A rule can stop an action and return an approval challenge. The approval is cryptographically bound to the exact action.
+
+Change the recipient, amount, tool, user, or policy and the old approval no longer works. Reuse the same approval and it is rejected.
+
+The v0.1.0 broker is the security primitive, not a finished approval dashboard or human workflow. Your product can connect it to the approval system you already use.
+
+### 3. Enforce budgets across a session
+
+Policies can limit:
+
+- how many times a tool is called
+- how much numeric value accumulates across calls
+- per-session budgets that can be applied alongside user and tenant rules
+
+The reservation happens before execution and is atomic for concurrent calls. A burst of parallel requests cannot spend the same remaining budget twice.
+
+### 4. Keep a useful decision trail
+
+Railproof records whether a call was allowed, denied, waiting for approval, started, completed, or failed.
+
+Built-in evidence includes identifiers, hashes, matched rules, reasons, outcomes, and a hashed principal. It does not store raw arguments, approval tokens, prompts, or tool results.
+
+Use the in-memory sink for local work or the append-only JSONL sink for a file-based audit trail.
+
+### 5. Give different agent stacks the same security contract
+
+The policy engine is protocol-independent. The repository includes adapters that normalize:
+
+- OpenAI Chat Completions function calls
+- MCP JSON-RPC 2.0 `tools/call` requests
+
+Both become the same canonical event before policy evaluation.
+
+### 6. Test policy behavior before production
+
+The CLI can validate policies, evaluate one event, and replay JSONL decision fixtures. That gives product and security teams a way to review expected outcomes without making real tool calls.
+
+The repository also includes a benchmark and its raw result. Railproof scored 10/10 against the benchmark’s declared requirements. NeMo Guardrails 0.24.0’s built-in tool-call validator scored 5/10.
+
+That is a narrow comparison against one NeMo rail. It is not a claim that Railproof replaces NeMo’s conversational rails, model-backed detectors, server, or observability.
+
+## How a decision works
+
+```text
+Agent proposes a tool call
+          |
+          v
+Adapter or GuardedTools creates one canonical action snapshot
+          |
+          v
+Policy validates tool, arguments, identity, labels, provenance, and session limits
+          |
+       +--+-------------------+
+       |                      |
+     deny             allow or approval
+       |                      |
+   no execution       reserve limits and verify approval
+                              |
+                              v
+                    wrapped executor runs exact snapshot
+                              |
+                              v
+                    evidence records the outcome
+```
+
+The important boundary is simple: application code does not receive a tool result until the action has passed the contract.
+
+## Feature detail
+
+### Strict policy compiler
+
+Policies use the `railproof.dev/v1alpha1` format. Compilation fails closed when the policy contains:
+
+- unknown fields or duplicate keys
+- an unsafe default
+- undeclared tools or limits
+- unsupported stages, effects, operators, or fields
+- invalid JSON Schema
+- schema references not supported by this alpha
+- oversized policy input or excessive YAML aliases
+
+Every compiled policy receives a deterministic SHA-256 policy hash.
+
+### Deterministic authorization
+
+The decision engine evaluates locally with no model call and no network call. It supports:
+
+- equality and inequality
+- membership and exclusion
+- numeric upper and lower bounds
+- field labels such as `sensitive`
+- provenance such as `retrieved.email`
+- principal ID, tenant, and roles
+- tool risk and sink metadata
+- per-session call counts and numeric sums
+
+Decision precedence is fixed:
+
+```text
+deny > require approval > allow > unmatched deny
+```
+
+There is no implicit allow.
+
+### Exact-action binding
+
+Railproof canonicalizes the caller’s arguments once into isolated event and execution snapshots. The hash covers:
+
+- policy
+- session
+- principal identity, tenant, and roles
+- tool name
+- complete arguments
+- labels
+- provenance
+
+This prevents a mutable or stateful caller mapping from being authorized as one action and executed as another.
+
+### Approval tokens
+
+The built-in approval broker uses HMAC-SHA-256 and requires a signing key of at least 32 bytes. Tokens bind the action hash, policy hash, principal, approver, expiry, and random nonce.
+
+It rejects forged, modified, malformed, expired, cross-principal, and reused tokens. Token replay protection is process-local in v0.1.0.
+
+### Safe execution wrapper
+
+`GuardedTools` combines authorization and execution so application code does not need to remember a separate “check first, execute later” rule.
+
+It supports synchronous and asynchronous executors, prevents denied executor entry, reserves budgets atomically, bounds active session state, and refuses session teardown while an execution is in flight.
+
+### Evidence sinks
+
+Two sinks are included:
+
+- `InMemoryEvidenceSink` with bounded retention, defaulting to 10,000 records
+- `JsonlEvidenceSink` for append-only newline-delimited records
+
+The built-in record contains event/session/tool identifiers, a principal hash, action/policy/decision hashes, outcome, matched rules, and reason codes.
+
+### CLI and replay
+
+```bash
+railproof validate policy.yaml
+railproof check policy.yaml event.json
+railproof replay policy.yaml fixtures.jsonl
+```
+
+`validate` compiles a policy and prints its hash. `check` evaluates one event. `replay` compares actual outcomes with expected outcomes and returns a failing exit code when fixtures disagree.
+
+## Quick start
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
@@ -34,16 +228,11 @@ uv run railproof validate examples/policy.yaml
 uv run python examples/demo.py
 ```
 
-Expected demo:
+The demo shows a benign weather call, a denied sensitive email, an approval challenge, and an approved email.
 
-```text
-Sunny in Bengaluru
-Denied: sensitive_data_to_external_sink
-Approval required for action <hash prefix>
-Sent to review@example.com
-```
+## Add it to an application
 
-Use the enforcement API around the only reference to each underlying tool:
+Register the real executor once, then route calls through `GuardedTools`:
 
 ```python
 from railproof.executor import GuardedTools, ToolRegistry
@@ -53,8 +242,8 @@ from railproof.policy import load_policy
 policy = load_policy("policy.yaml")
 registry = ToolRegistry()
 registry.register("get_weather", get_weather)
-tools = GuardedTools(policy, registry)
 
+tools = GuardedTools(policy, registry)
 result = await tools.call(
     "get_weather",
     {"city": "Bengaluru"},
@@ -63,41 +252,50 @@ result = await tools.call(
 )
 ```
 
-See [the complete policy](examples/policy.yaml) and [runnable demo](examples/demo.py).
+For high-impact actions, configure an `ApprovalBroker`, catch `ApprovalRequired`, obtain approval through your application workflow, and call the same action with the returned token.
 
-## Measured NeMo comparison
+See the [complete example policy](examples/policy.yaml) and [runnable demo](examples/demo.py).
 
-On the checked-in model-free tool authorization benchmark, Railproof v0.1.0 passed 10/10 scenarios and NeMo Guardrails v0.24.0's built-in tool-call validator passed 5/10.
+## What Railproof is not
 
-| Property | Railproof | NeMo 0.24.0 built-in tool-call rail |
-|---|---:|---:|
-| Unknown tool and invalid schema | 2/2 | 2/2 |
-| Benign controls | 3/3 | 3/3 |
-| Destination policy | 1/1 | 0/1 |
-| Provenance-aware recipient policy | 1/1 | 0/1 |
-| Sensitive-flow policy | 1/1 | 0/1 |
-| Action approval requirement | 1/1 | 0/1 |
-| Cross-step budget | 1/1 | 0/1 |
-| Total | **10/10** | **5/10** |
+This alpha is an enforcement runtime, not a complete AI platform. It does not provide:
 
-The same 10,000-iteration run measured 44 µs p50 and 57 µs p99 for Railproof, versus 492 µs p50 and 575 µs p99 for NeMo's validator on macOS arm64 with Python 3.11. This is a narrow win over NeMo's built-in deterministic tool-call rail, not a claim that Railproof replaces NeMo's conversational rails, model-backed detectors, server, or observability. NeMo can add semantic checks through custom actions.
+- a model or content-moderation system
+- a sandbox against code that bypasses the wrapper
+- automatic taint tracking or provenance attestation
+- tool-result validation after execution
+- argument rewriting or policy-driven mutation
+- persistent or distributed session budgets and nonce storage
+- a hosted control plane, dashboard, or approval UI
+- a TypeScript SDK
 
-Reproduce it:
+These are explicit boundaries. Production teams should keep the underlying executors private, default policies to deny, protect signing keys, and treat labels and provenance as application-attested inputs.
 
-```bash
-uv sync --group benchmark
-uv run python benchmarks/compare_nemo.py --iterations 10000
-```
+## Evidence for the v0.1.0 alpha
 
-The [benchmark method](docs/BENCHMARK.md), [policy](benchmarks/policy.yaml), [runner](benchmarks/compare_nemo.py), and [raw result](docs/benchmark-results/v0.1.0-nemo-0.24.0.json) are checked in.
+| Gate | Result |
+|---|---:|
+| Tests | 110 passed |
+| Branch coverage | 94.18% |
+| NeMo comparison | Railproof 10/10, NeMo 5/10 |
+| Railproof benchmark latency | 44 µs p50, 48 µs p95, 57 µs p99 |
+| NeMo benchmark latency | 492 µs p50, 517 µs p95, 575 µs p99 |
+| Dependency audit | No known vulnerabilities found |
+| GitHub Actions workflow audit | Zizmor: no findings |
 
-## Security boundary
+The benchmark uses NeMo Guardrails 0.24.0’s real deterministic `ToolCallRailAction._validate` implementation with no model or network calls. Read the [benchmark method](docs/BENCHMARK.md) before interpreting the comparison.
 
-Railproof controls only calls routed through `GuardedTools`. Direct access to an underlying executor bypasses it. Labels and provenance are application-attested inputs; v0.1.0 does not infer or cryptographically verify data lineage. Session state and approval replay protection are in-memory and process-local.
+## Repository map
 
-This alpha provides one enforcement stage, `before_tool`. It does not provide content moderation, a hosted service, distributed state, argument rewriting, or tool-result validation.
-
-Read [SECURITY.md](SECURITY.md) before production use.
+| Path | Purpose |
+|---|---|
+| `src/railproof/` | Runtime, policy compiler, engine, approvals, evidence, adapters, CLI, and replay |
+| `tests/` | Security and correctness contract tests |
+| `examples/` | Copy-pasteable policy and runnable demo |
+| `benchmarks/` | NeMo comparison harness and benchmark policy |
+| `docs/` | Architecture, product specification, threat model, competitive analysis, and benchmark evidence |
+| `PROJECT_PLAN.md` | Product direction and staged roadmap |
+| `.github/workflows/ci.yml` | Python quality matrix, dependency audit, and benchmark gate |
 
 ## Development
 
@@ -110,15 +308,15 @@ uv run pip-audit
 uv build
 ```
 
-The test suite contains 110 deterministic, adversarial, concurrency, replay, CLI, and property-based tests with a 90% branch-coverage release gate; the current result is 94.18%.
+Read [SECURITY.md](SECURITY.md) before production use. Contributions should include an adversarial fixture, a benign control, an expected decision, and proof of whether the executor was reached. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Policy and product specification](docs/PRODUCT_SPEC.md)
+- [Product specification](docs/PRODUCT_SPEC.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [NeMo comparison](docs/COMPETITIVE_ANALYSIS.md)
-- [Benchmark](docs/BENCHMARK.md)
+- [Benchmark method](docs/BENCHMARK.md)
 - [Project plan](PROJECT_PLAN.md)
 - [Roadmap](ROADMAP.md)
 
