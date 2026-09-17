@@ -218,7 +218,7 @@ railproof replay policy.yaml fixtures.jsonl
 
 ## Install
 
-Once the first release is published, install Railproof from PyPI:
+Install Railproof from [PyPI](https://pypi.org/project/railproof/):
 
 ```bash
 python -m pip install railproof
