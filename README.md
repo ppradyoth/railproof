@@ -3,6 +3,8 @@
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Apache-2.0 license](https://img.shields.io/badge/license-Apache--2.0-green)
+[![PyPI](https://img.shields.io/pypi/v/railproof.svg)](https://pypi.org/project/railproof/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/railproof.svg)](https://pypi.org/project/railproof/)
 ![110 tests](https://img.shields.io/badge/tests-110%20passing-brightgreen)
 ![94.18% branch coverage](https://img.shields.io/badge/branch%20coverage-94.18%25-brightgreen)
 
@@ -218,7 +220,7 @@ railproof replay policy.yaml fixtures.jsonl
 
 ## Install
 
-Install Railproof from [PyPI](https://pypi.org/project/railproof/):
+Railproof is published on [PyPI](https://pypi.org/project/railproof/). Install the latest release with:
 
 ```bash
 python -m pip install railproof
@@ -229,6 +231,12 @@ Or with uv:
 ```bash
 uv add railproof
 ```
+
+Package links:
+
+- [PyPI project page](https://pypi.org/project/railproof/)
+- [PyPI release files](https://pypi.org/project/railproof/#files)
+- [GitHub releases](https://github.com/ppradyoth/railproof/releases)
 
 The package includes the runtime library and the `railproof` command. No repository clone is needed to use it.
 
